@@ -5,14 +5,14 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
-#include "StepperMotor.h"
+#include "PWMControl.h"
 
 
 
 class WebServer {
 public:
 	struct WebContext {
-		StepperMotor& stepper;
+		PWMControl& pump;
 	};
 
     WebServer(WebContext& context);

@@ -289,34 +289,15 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Check if a "speed" parameter is present
-    cJSON *speed_item = cJSON_GetObjectItem(json, "speed");
-    if (speed_item && cJSON_IsNumber(speed_item)) {
-        int speed = speed_item->valueint;
-        ESP_LOGI(TAG, "Received speed: %d", speed);
-        ws->webContext.stepper.setFrequency(speed);
+    // Check if a "dutyCycle" parameter is present
+    cJSON *duty_cycle_item = cJSON_GetObjectItem(json, "dutyCycle");
+    if (duty_cycle_item && cJSON_IsNumber(duty_cycle_item)) {
+        int dutyCycle = duty_cycle_item->valueint;
+        ESP_LOGI(TAG, "Received dutyCycle: %d", dutyCycle);
+        ws->webContext.pump.setDutyCycle((int)dutyCycle);
     } else {
-        ESP_LOGE(TAG, "Speed is missing or not a number");
+        ESP_LOGE(TAG, "duty cycle is missing or not a number");
     }
-
-    // Check for a "command" parameter to handle start/stop
-    cJSON *command_item = cJSON_GetObjectItem(json, "command");
-    if (command_item && cJSON_IsString(command_item)) {
-        std::string command = command_item->valuestring;
-        if (command == "start") {
-            ESP_LOGI(TAG, "Received start command");
-            ws->webContext.stepper.start();  // Call start function
-        } else if (command == "stop") {
-            ESP_LOGI(TAG, "Received stop command");
-            ws->webContext.stepper.stop();   // Call stop function
-        } else {
-            ESP_LOGE(TAG, "Invalid command: %s", command.c_str());
-            cJSON_Delete(json);
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid command");
-            return ESP_FAIL;
-        }
-    }
-
     cJSON_Delete(json);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
@@ -333,11 +314,12 @@ esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
     time_t now;
     time(&now);
     struct tm time_info;
-    gmtime_r(&now, &time_info);
+    localtime_r(&now, &time_info);
 
     // Create ISO 8601 time string
     char time_str[30];
-    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%SZ", &time_info);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S%z", &time_info);
+
 
     // Create JSON response
     cJSON *json = cJSON_CreateObject();
