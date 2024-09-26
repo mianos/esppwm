@@ -112,19 +112,24 @@ public:
 private:
 	static constexpr int floatDecimals = 4;
 
-    template<typename T>
-    void addItemInternal(const std::string& key, const T& value) {
-        if constexpr (std::is_integral_v<T>) {
-            cJSON_AddNumberToObject(jsonObj_.get(), key.c_str(), static_cast<double>(value));
-        } else if constexpr (std::is_floating_point_v<T>) {
-            double roundedValue = std::round(value * std::pow(10, floatDecimals)) / std::pow(10, floatDecimals);
-            cJSON_AddNumberToObject(jsonObj_.get(), key.c_str(), roundedValue);
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            cJSON_AddStringToObject(jsonObj_.get(), key.c_str(), value.c_str());
-        } else {
-            static_assert(false, "Unsupported type for AddItem");
-        }
-    }
+
+	template<typename T>
+	void addItemInternal(const std::string& key, const T& value) {
+		if constexpr (std::is_integral_v<T>) {
+			cJSON_AddNumberToObject(jsonObj_.get(), key.c_str(), static_cast<double>(value));
+		} else if constexpr (std::is_floating_point_v<T>) {
+			double roundedValue = std::round(value * std::pow(10, floatDecimals)) / std::pow(10, floatDecimals);
+			cJSON_AddNumberToObject(jsonObj_.get(), key.c_str(), roundedValue);
+		} else if constexpr (std::is_same_v<T, std::string>) {
+			cJSON_AddStringToObject(jsonObj_.get(), key.c_str(), value.c_str());
+		} else if constexpr (std::is_same_v<T, const char*>) {  // Handle C-style string (const char*)
+			cJSON_AddStringToObject(jsonObj_.get(), key.c_str(), value);
+		} else if constexpr (std::is_array_v<T> && std::is_same_v<std::remove_extent_t<T>, char>) {  // Handle char[]
+			cJSON_AddStringToObject(jsonObj_.get(), key.c_str(), std::string(value).c_str());
+		} else {
+			static_assert(false, "Unsupported type for AddItem");
+		}
+	}
 
 	template<typename T>
 	bool assignValue(cJSON* item, T& value) const {

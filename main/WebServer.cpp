@@ -2,10 +2,11 @@
 #include <vector>
 #include <cstring>
 #include <string>
-#include "cJSON.h"
-#include "WebServer.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+
+#include "JsonWrapper.h"
+#include "WebServer.h"
 
 
 static const char *TAG = "WebServer";
@@ -282,23 +283,23 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     }
     buffer[total_len] = '\0'; // Null-terminate the string
 
-    cJSON *json = cJSON_Parse(buffer.data());
-    if (json == NULL) {
+   // Parse the buffer using JsonWrapper
+    JsonWrapper json = JsonWrapper::Parse(buffer.data());
+    if (json.Empty()) {
         ESP_LOGE(TAG, "Failed to parse JSON");
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
         return ESP_FAIL;
     }
 
-    // Check if a "dutyCycle" parameter is present
-    cJSON *duty_cycle_item = cJSON_GetObjectItem(json, "dutyCycle");
-    if (duty_cycle_item && cJSON_IsNumber(duty_cycle_item)) {
-        int dutyCycle = duty_cycle_item->valueint;
-        ESP_LOGI(TAG, "Received dutyCycle: %d", dutyCycle);
-        ws->webContext.pump.setDutyCycle((int)dutyCycle);
+    // Check if a "duty" parameter is present and is a number
+    float duty = 0.0;
+    if (json.GetField<float>("duty", duty)) {
+        ESP_LOGI(TAG, "Received duty: %g", duty);
+        ws->webContext.pump.setDutyCyclePercentage(duty);
     } else {
         ESP_LOGE(TAG, "duty cycle is missing or not a number");
     }
-    cJSON_Delete(json);
+
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
     return ESP_OK;
@@ -320,19 +321,12 @@ esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
     char time_str[30];
     strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S%z", &time_info);
 
-
-    // Create JSON response
-    cJSON *json = cJSON_CreateObject();
-    cJSON_AddNumberToObject(json, "uptime", uptime_sec);
-    cJSON_AddStringToObject(json, "time", time_str);
-
-    const char *json_str = cJSON_PrintUnformatted(json);
-
+    JsonWrapper json;
+    json.AddItem("uptime", uptime_sec);
+    json.AddItem("time", time_str);
+    std::string json_str = json.ToString();
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json_str);
-
-    cJSON_Delete(json);
-    free((void*)json_str);
+    httpd_resp_sendstr(req, json_str.c_str());
     return ESP_OK;
 }
 
