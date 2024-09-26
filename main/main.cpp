@@ -53,7 +53,7 @@ void button_task(void *pvParameters) {
     while (1) {
         if (button.longPressed()) {
             ESP_LOGI("BUTTON", "Long press detected, resetting WiFi settings.");
-//            wifiManager->clear();
+            wifiManager->clear();
         }
         vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100 ms
     }
