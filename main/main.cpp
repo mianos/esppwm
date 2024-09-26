@@ -3,6 +3,9 @@
 #include "esp_log.h"
 #include "esp_sntp.h"
 
+#include "sdkconfig.h"
+
+#include "Button.h"
 #include "WifiManager.h"
 #include "SettingsManager.h"
 #include "WebServer.h"
@@ -43,12 +46,27 @@ void initialize_sntp(SettingsManager& settings) {
 }
 
 
+void button_task(void *pvParameters) {
+	WiFiManager *wifiManager = static_cast<WiFiManager*>(pvParameters);  // Cast the void pointer back to WiFiManager pointer
+
+    Button button(static_cast<gpio_num_t>(CONFIG_BUTTON_PIN));
+    while (1) {
+        if (button.longPressed()) {
+            ESP_LOGI("BUTTON", "Long press detected, resetting WiFi settings.");
+//            wifiManager->clear();
+        }
+        vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100 ms
+    }
+}
+
+
 extern "C" void app_main() {
 	NvsStorageManager nv;
 	SettingsManager settings(nv);
 
 	wifiSemaphore = xSemaphoreCreateBinary();
 	WiFiManager wifiManager(nv, localEventHandler, nullptr);
+	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
 //	wifiManager.clear();
     if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
 		PWMControl pump;

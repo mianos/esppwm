@@ -12,4 +12,5 @@ idf_component_register(
         nvsstoragemanager
         jsonwrapper
         esp_http_server
+        button
 )
