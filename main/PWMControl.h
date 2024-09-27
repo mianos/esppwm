@@ -17,8 +17,17 @@ public:
     // Set the duty cycle as a raw integer value (0 to max based on resolution)
     void setDutyCycle(int newDuty) {
         duty = newDuty;
-        ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty));
-        ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
+        
+        // Reapply the duty cycle
+        esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+        if (err != ESP_OK) {
+            ESP_LOGE("PWMControl", "Failed to set duty cycle: %s", esp_err_to_name(err));
+        }
+
+        err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        if (err != ESP_OK) {
+            ESP_LOGE("PWMControl", "Failed to update duty cycle: %s", esp_err_to_name(err));
+        }
     }
 
     // Set the duty cycle as a percentage (0.0 to 100.0)
@@ -36,13 +45,41 @@ public:
         setDutyCycle(newDuty);
     }
 
+    // Set a new PWM frequency and reinitialize LEDC
+    void setFrequency(int newFrequency) {
+        if (newFrequency <= 0) {
+            ESP_LOGE("PWMControl", "Invalid frequency: %d", newFrequency);
+            return;
+        }
+        
+        frequency = static_cast<uint32_t>(newFrequency);
+        
+        // Save current duty cycle so it can be reapplied after reinitializing the timer
+        int currentDuty = duty;
+
+        // Reinitialize the LEDC with the new frequency
+        if (!initializeLEDC()) {
+            ESP_LOGE("PWMControl", "LEDC reinitialization with new frequency failed.");
+            return;
+        }
+
+        // Restore the duty cycle after frequency change
+        setDutyCycle(currentDuty);
+    }
+
 private:
     bool initializeLEDC() {
+        if (frequency == 0) {
+            ESP_LOGE("PWMControl", "Invalid frequency (0) during LEDC initialization.");
+            return false;
+        }
+
+        // LEDC Timer configuration
         ledc_timer_config_t ledc_timer{};
         ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
         ledc_timer.timer_num = LEDC_TIMER_0;
         ledc_timer.duty_resolution = resolution_bits;
-        ledc_timer.freq_hz = frequency;
+        ledc_timer.freq_hz = frequency;  // Ensure frequency is not zero
         ledc_timer.clk_cfg = LEDC_AUTO_CLK;
 
         esp_err_t err = ledc_timer_config(&ledc_timer);
@@ -51,6 +88,7 @@ private:
             return false;
         }
 
+        // LEDC Channel configuration
         ledc_channel_config_t ledc_channel{};
         ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
         ledc_channel.channel = LEDC_CHANNEL_0;
@@ -75,3 +113,4 @@ private:
     ledc_timer_bit_t resolution_bits;  // Use ledc_timer_bit_t instead of int for resolution bits
     int duty;
 };
+

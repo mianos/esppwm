@@ -283,28 +283,40 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     }
     buffer[total_len] = '\0'; // Null-terminate the string
 
-   // Parse the buffer using JsonWrapper
-    JsonWrapper json = JsonWrapper::Parse(buffer.data());
-    if (json.Empty()) {
-        ESP_LOGE(TAG, "Failed to parse JSON");
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
+	// Parse the buffer using JsonWrapper
+	JsonWrapper json = JsonWrapper::Parse(buffer.data());
+	
+	// Check if a "duty" parameter is present and is a number
+	float duty = 0.0;
+	if (json.GetField<float>("duty", duty)) {
+		ESP_LOGI(TAG, "Received duty: %g", duty);
+		ws->webContext.pump.setDutyCyclePercentage(duty);
+	} else {
+		ESP_LOGE(TAG, "duty cycle is missing or not a number");
+	}
 
-    // Check if a "duty" parameter is present and is a number
-    float duty = 0.0;
-    if (json.GetField<float>("duty", duty)) {
-        ESP_LOGI(TAG, "Received duty: %g", duty);
-        ws->webContext.pump.setDutyCyclePercentage(duty);
-    } else {
-        ESP_LOGE(TAG, "duty cycle is missing or not a number");
-    }
+	// Check if a "frequency" field is present (optional) and is a number
+	if (json.ContainsField("frequency")) {
+		float frequency = 0.0;
+		if (json.GetField<float>("frequency", frequency)) {
+			if (frequency > 0.0f) {
+				ESP_LOGI(TAG, "Received frequency: %g", frequency);
+				ws->webContext.pump.setFrequency(static_cast<int>(frequency));  // Cast to int for frequency
+			} else {
+				ESP_LOGE(TAG, "Invalid frequency: %g", frequency);
+			}
+		} else {
+			ESP_LOGE(TAG, "frequency is not a valid number");
+		}
+	} else {
+		ESP_LOGI(TAG, "frequency field is not present, keeping previous frequency.");
+	}
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
-    return ESP_OK;
+	// Send the response back
+	httpd_resp_set_type(req, "application/json");
+	httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
+	return ESP_OK;
 }
-
 
 esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
     // Get ESP uptime in seconds
