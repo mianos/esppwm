@@ -21,6 +21,7 @@ public:
 
     std::string tz = "AEST-10AEDT,M10.1.0,M4.1.0/3";
     std::string ntpServer = "time.google.com";
+    int frequency = 1000;
 
 	std::string convertChangesToJson(const SettingsManager::ChangeList& changes) {
 		cJSON *root = cJSON_CreateObject();
@@ -39,20 +40,28 @@ public:
 
         nvs.retrieve("tz", tz);
         nvs.retrieve("ntpServer", ntpServer);
+		if (nvs.retrieve("frequency", value))
+			frequency = std::stoi(value);
     }
 
 	std::string toJson() const {
         JsonWrapper json;
         json.AddItem("tz", tz);
         json.AddItem("ntpServer", ntpServer);
+        json.AddItem("frequency", ntpServer);
         return json.ToString();
     }
 
-   ChangeList updateFromJson(const std::string& jsonString) {
+	void Store(const std::string key, std::string value) {
+		nvs.store(key, value);
+	}
+
+    ChangeList updateFromJson(const std::string& jsonString) {
         ChangeList changes;
         JsonWrapper json = JsonWrapper::Parse(jsonString);
         updateFieldIfChanged(json, "tz", tz, changes);
         updateFieldIfChanged(json, "ntpServer", ntpServer, changes);
+        updateFieldIfChanged(json, "frequency", frequency, changes);
 
         // Save any changes to NVRAM
         for (const auto& [key, value] : changes) {

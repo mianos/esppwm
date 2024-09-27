@@ -69,12 +69,12 @@ extern "C" void app_main() {
 	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
 //	wifiManager.clear();
     if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
-		PWMControl pump;
+		PWMControl pump(GPIO_NUM_2, settings.frequency);
 
 		ESP_LOGI(TAG, "Main task continues after WiFi connection.");
 		initialize_sntp(settings);
 
-		static WebServer::WebContext ctx{pump};
+		static WebServer::WebContext ctx{pump, settings};
         static WebServer webServer{ctx};
 
         if (webServer.start() == ESP_OK) {

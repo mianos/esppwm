@@ -297,13 +297,14 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
 
 	// Check if a "frequency" field is present (optional) and is a number
 	if (json.ContainsField("frequency")) {
-		float frequency = 0.0;
-		if (json.GetField<float>("frequency", frequency)) {
+		int frequency = 0;
+		if (json.GetField<int>("frequency", frequency)) {
 			if (frequency > 0.0f) {
-				ESP_LOGI(TAG, "Received frequency: %g", frequency);
-				ws->webContext.pump.setFrequency(static_cast<int>(frequency));  // Cast to int for frequency
+				ESP_LOGI(TAG, "Received frequency: %d", frequency);
+				ws->webContext.pump.setFrequency(frequency);
+				ws->webContext.settings.Store("frequency", std::to_string(frequency));
 			} else {
-				ESP_LOGE(TAG, "Invalid frequency: %g", frequency);
+				ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
 			}
 		} else {
 			ESP_LOGE(TAG, "frequency is not a valid number");

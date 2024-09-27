@@ -6,13 +6,14 @@
 #include <freertos/task.h>
 
 #include "PWMControl.h"
-
+#include "SettingsManager.h"
 
 
 class WebServer {
 public:
 	struct WebContext {
 		PWMControl& pump;
+		SettingsManager &settings;
 	};
 
     WebServer(WebContext& context);
