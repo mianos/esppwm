@@ -67,11 +67,10 @@ extern "C" void app_main() {
 	wifiSemaphore = xSemaphoreCreateBinary();
 	WiFiManager wifiManager(nv, localEventHandler, nullptr);
 	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
-//	wifiManager.clear();
     if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
-		PWMControl pump(GPIO_NUM_2, settings.frequency);
+		PWMControl pump(settings.frequency, settings.duty);
 
-		ESP_LOGI(TAG, "Main task continues after WiFi connection.");
+		ESP_LOGI(TAG, "Main task continues after WiFi connection. duty is %g", settings.duty);
 		initialize_sntp(settings);
 
 		static WebServer::WebContext ctx{pump, settings};

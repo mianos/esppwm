@@ -1,23 +1,36 @@
 #pragma once
 
+#include <cmath>
 #include "driver/ledc.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
 class PWMControl {
 public:
-    PWMControl(int gpio_num = GPIO_NUM_2, int frequency = 5000, ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT, int duty = 4095)
-        : gpio_num(gpio_num), frequency(static_cast<uint32_t>(frequency)), resolution_bits(resolution_bits), duty(duty) {
-        
+    PWMControl(int frequency = 5000, double duty = 50.0, int gpio_num = GPIO_NUM_2, ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT)
+        : gpio_num(gpio_num), frequency(static_cast<uint32_t>(frequency)), resolution_bits(resolution_bits), duty(duty), last_frequency(frequency), last_duty(duty) {
+
         if (!initializeLEDC()) {
             ESP_LOGE("PWMControl", "LEDC initialization failed.");
         }
+
+        // Start at the duty cycle provided in the constructor
+        setDutyCyclePercentage(duty);
     }
+
+
+
+	float getCurrentPercentage() const {
+		int max_duty = (1 << resolution_bits) - 1;  // For 13-bit resolution, this is 8191
+		float percentage = (static_cast<float>(duty) / max_duty) * 100.0f;
+		return std::round(percentage * 10.0f) / 10.0f;
+	}
 
     // Set the duty cycle as a raw integer value (0 to max based on resolution)
     void setDutyCycle(int newDuty) {
         duty = newDuty;
-        
+        last_duty = newDuty;
+
         // Reapply the duty cycle
         esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         if (err != ESP_OK) {
@@ -51,9 +64,10 @@ public:
             ESP_LOGE("PWMControl", "Invalid frequency: %d", newFrequency);
             return;
         }
-        
+
         frequency = static_cast<uint32_t>(newFrequency);
-        
+        last_frequency = newFrequency;
+
         // Save current duty cycle so it can be reapplied after reinitializing the timer
         int currentDuty = duty;
 
@@ -110,7 +124,10 @@ private:
 private:
     int gpio_num;
     uint32_t frequency;
-    ledc_timer_bit_t resolution_bits;  // Use ledc_timer_bit_t instead of int for resolution bits
+    ledc_timer_bit_t resolution_bits;
     int duty;
-};
 
+    // Track the last frequency and duty cycle
+    uint32_t last_frequency;
+    int last_duty;
+};

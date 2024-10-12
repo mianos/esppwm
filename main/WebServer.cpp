@@ -291,6 +291,7 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
 	if (json.GetField<float>("duty", duty)) {
 		ESP_LOGI(TAG, "Received duty: %g", duty);
 		ws->webContext.pump.setDutyCyclePercentage(duty);
+		ws->webContext.settings.Store("duty", std::to_string(duty));
 	} else {
 		ESP_LOGE(TAG, "duty cycle is missing or not a number");
 	}
@@ -320,6 +321,7 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
 }
 
 esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
+    GET_CONTEXT(req, ws);
     // Get ESP uptime in seconds
     uint64_t uptime_us = esp_timer_get_time();
     uint32_t uptime_sec = static_cast<uint32_t>(uptime_us / 1000000ULL);
@@ -337,6 +339,7 @@ esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
     JsonWrapper json;
     json.AddItem("uptime", uptime_sec);
     json.AddItem("time", time_str);
+    json.AddItem("duty", ws->webContext.pump.getCurrentPercentage());
     std::string json_str = json.ToString();
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json_str.c_str());
