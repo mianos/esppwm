@@ -5,9 +5,10 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
+static const int default_frequency = 5000;
 class PWMControl {
 public:
-    PWMControl(int frequency = 5000, double duty = 50.0, int gpio_num = GPIO_NUM_2, ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT)
+    PWMControl(int frequency = default_frequency, double duty = 50.0, int gpio_num = GPIO_NUM_2, ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT)
         : gpio_num(gpio_num), frequency(static_cast<uint32_t>(frequency)), resolution_bits(resolution_bits), duty(duty), last_frequency(frequency), last_duty(duty) {
 
         if (!initializeLEDC()) {
@@ -61,8 +62,8 @@ public:
     // Set a new PWM frequency and reinitialize LEDC
     void setFrequency(int newFrequency) {
         if (newFrequency <= 0) {
-            ESP_LOGE("PWMControl", "Invalid frequency: %d", newFrequency);
-            return;
+            ESP_LOGE("PWMControl", "Invalid frequency setting to 5000");
+            newFrequency = 5000;
         }
 
         frequency = static_cast<uint32_t>(newFrequency);
@@ -84,8 +85,8 @@ public:
 private:
     bool initializeLEDC() {
         if (frequency == 0) {
-            ESP_LOGE("PWMControl", "Invalid frequency (0) during LEDC initialization.");
-            return false;
+            ESP_LOGE("PWMControl", "Invalid frequency (0) during LEDC initialization setting to %d", default_frequency);
+            frequency = default_frequency;
         }
 
         // LEDC Timer configuration
