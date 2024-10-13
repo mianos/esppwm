@@ -327,7 +327,7 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
             ESP_LOGI(TAG, "Received period: %d ms", period);
             // Temporarily set duty cycle for the specified period, will return to 0%
             ws->webContext.pump.setDutyCyclePercentage(duty, period);
-            ESP_LOGI(TAG, "Dont set duty cycle");
+            ESP_LOGI(TAG, "Dont set duty cycle in nvram");
         } else {
             ESP_LOGE(TAG, "Invalid 'period' value");
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'period' value");
