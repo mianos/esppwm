@@ -91,17 +91,28 @@ private:
         }
     }
 
-    static void dutyCycleTask(void* pvParameter) {
-        PWMControl* pwm = static_cast<PWMControl*>(pvParameter);
-        DutyCycleCommand command;
 
-        for (;;) {
-            if (xQueueReceive(pwm->duty_cycle_queue, &command, portMAX_DELAY)) {
-                ESP_LOGI("PWMControl", "Received duty: %d, period: %d", command.duty, command.period);
-                pwm->setDutyCycle(command.duty);
-            }
-        }
-    }
+	static void dutyCycleTask(void* pvParameter) {
+		PWMControl* pwm = static_cast<PWMControl*>(pvParameter);
+		DutyCycleCommand command;
+
+		for (;;) {
+			if (xQueueReceive(pwm->duty_cycle_queue, &command, portMAX_DELAY)) {
+				ESP_LOGI("PWMControl", "Received duty: %d, period: %d", command.duty, command.period);
+
+				if (command.period == 0) {
+					// If period is 0, just set the duty cycle
+					pwm->setDutyCycle(command.duty);
+				} else {
+					int previousDuty = pwm->duty;
+					pwm->setDutyCycle(command.duty);
+					// Wait for the specified period (in milliseconds)
+					vTaskDelay(pdMS_TO_TICKS(command.period));
+					pwm->setDutyCycle(previousDuty);
+				}
+			}
+		}
+	}
 
     bool initializeLEDC() {
         if (frequency == 0) {
