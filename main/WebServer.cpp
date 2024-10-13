@@ -283,69 +283,42 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     }
     buffer[total_len] = '\0'; // Null-terminate the string
 
-    // Parse the buffer using JsonWrapper
-    JsonWrapper json = JsonWrapper::Parse(buffer.data());
+	// Parse the buffer using JsonWrapper
+	JsonWrapper json = JsonWrapper::Parse(buffer.data());
+	
+	// Check if a "duty" parameter is present and is a number
+	float duty = 0.0;
+	if (json.GetField<float>("duty", duty)) {
+		ESP_LOGI(TAG, "Received duty: %g", duty);
+		ws->webContext.pump.setDutyCyclePercentage(duty);
+		ws->webContext.settings.Store("duty", std::to_string(duty));
+	} else {
+		ESP_LOGE(TAG, "duty cycle is missing or not a number");
+	}
 
-    // Variables to hold parsed values
-    float duty = 0.0f;
-    int frequency = 0;
-    int period = 0;
+	// Check if a "frequency" field is present (optional) and is a number
+	if (json.ContainsField("frequency")) {
+		int frequency = 0;
+		if (json.GetField<int>("frequency", frequency)) {
+			if (frequency > 0.0f) {
+				ESP_LOGI(TAG, "Received frequency: %d", frequency);
+				ws->webContext.pump.setFrequency(frequency);
+				ws->webContext.settings.Store("frequency", std::to_string(frequency));
+			} else {
+				ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
+			}
+		} else {
+			ESP_LOGE(TAG, "frequency is not a valid number");
+		}
+	} else {
+		ESP_LOGI(TAG, "frequency field is not present, keeping previous frequency.");
+	}
 
-    // Parse "duty"
-    if (json.GetField<float>("duty", duty)) {
-        ESP_LOGI(TAG, "Received duty: %g", duty);
-    } else {
-        ESP_LOGE(TAG, "Duty cycle is missing or not a number");
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid or missing 'duty' parameter");
-        return ESP_FAIL;
-    }
-
-    // Parse "frequency" (optional)
-    if (json.ContainsField("frequency")) {
-        if (json.GetField<int>("frequency", frequency)) {
-            if (frequency > 0) {
-                ESP_LOGI(TAG, "Received frequency: %d", frequency);
-                ws->webContext.pump.setFrequency(frequency);
-                ws->webContext.settings.Store("frequency", std::to_string(frequency));
-            } else {
-                ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-                return ESP_FAIL;
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to parse 'frequency' field");
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-            return ESP_FAIL;
-        }
-    } else {
-        ESP_LOGI(TAG, "Frequency field is not present, keeping previous frequency.");
-    }
-
-    // Parse "period" (optional)
-    if (json.ContainsField("period")) {
-        if (json.GetField<int>("period", period) && period > 0) {
-            ESP_LOGI(TAG, "Received period: %d ms", period);
-            // Temporarily set duty cycle for the specified period, will return to 0%
-            ws->webContext.pump.setDutyCyclePercentage(duty, period);
-            ESP_LOGI(TAG, "Dont set duty cycle");
-        } else {
-            ESP_LOGE(TAG, "Invalid 'period' value");
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'period' value");
-            return ESP_FAIL;
-        }
-    } else {
-        // Permanently set duty cycle
-        ws->webContext.pump.setDutyCyclePercentage(duty);
-        ws->webContext.settings.Store("duty", std::to_string(duty));
-    }
-
-    // Send the response back
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
-    return ESP_OK;
+	// Send the response back
+	httpd_resp_set_type(req, "application/json");
+	httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
+	return ESP_OK;
 }
-
-
 
 esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
     GET_CONTEXT(req, ws);
