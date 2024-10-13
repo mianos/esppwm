@@ -44,7 +44,7 @@ public:
     }
 
     // Set the duty cycle as a percentage (0.0 to 100.0)
-    void setDutyCyclePercentage(float percentage) {
+    void setDutyCyclePercentage(float percentage, int period=0) {
         if (percentage < 0.0f) {
             percentage = 0.0f;  // Clamp percentage to 0% if below range
         } else if (percentage > 100.0f) {
