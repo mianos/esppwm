@@ -47,27 +47,6 @@ esp_err_t WebServer::start() {
         return ret;
     }
 
-    httpd_uri_t index_uri = {
-        .uri       = "/",
-        .method    = HTTP_GET,
-        .handler   = index_handler,
-        .user_ctx  = this
-    };
-
-    httpd_uri_t long_uri = {
-        .uri       = "/long",
-        .method    = HTTP_GET,
-        .handler   = long_async_handler,
-        .user_ctx  = this
-    };
-
-    httpd_uri_t quick_uri = {
-        .uri       = "/quick",
-        .method    = HTTP_GET,
-        .handler   = quick_handler,
-        .user_ctx  = this
-    };
-
     httpd_uri_t pump_uri = {
         .uri       = "/pump",
         .method    = HTTP_POST,
@@ -75,18 +54,23 @@ esp_err_t WebServer::start() {
         .user_ctx  = this
     };
 
+    httpd_uri_t reset_wifi_uri = {
+        .uri       = "/reset",
+        .method    = HTTP_POST,
+        .handler   = reset_wifi_handler,
+        .user_ctx  = this
+    };
+
 	httpd_uri_t healthz_uri = {
-    .uri       = "/healthz",
-    .method    = HTTP_GET,
-    .handler   = healthz_handler,
-    .user_ctx  = this
-};
+		.uri       = "/healthz",
+		.method    = HTTP_GET,
+		.handler   = healthz_handler,
+		.user_ctx  = this
+	};
 
 
-    httpd_register_uri_handler(server, &index_uri);
-    httpd_register_uri_handler(server, &long_uri);
-    httpd_register_uri_handler(server, &quick_uri);
 	httpd_register_uri_handler(server, &pump_uri);
+	httpd_register_uri_handler(server, &reset_wifi_uri);
 	httpd_register_uri_handler(server, &healthz_uri);
 
     return ESP_OK;
@@ -140,38 +124,6 @@ esp_err_t WebServer::submit_async_req(httpd_req_t *req, httpd_req_handler_t hand
         return ESP_FAIL;
     }
 
-    return ESP_OK;
-}
-
-esp_err_t WebServer::long_async_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "uri: /long");
-
-    if (!is_on_async_worker_thread()) {
-        if (submit_async_req(req, long_async_handler) == ESP_OK) {
-            return ESP_OK;
-        } else {
-            httpd_resp_set_status(req, "503 Service Unavailable");
-            httpd_resp_sendstr(req, "<div>No workers available. Server busy.</div>");
-            return ESP_OK;
-        }
-    }
-
-    // Track the number of long requests
-    static uint8_t req_count = 0;
-    req_count++;
-
-    // Send initial response
-    char s[100];
-    snprintf(s, sizeof(s), "<div>req: %u</div>\n", req_count);
-    httpd_resp_sendstr_chunk(req, s);
-
-    // Simulate long-running task
-    for (int i = 0; i < 10; ++i) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        snprintf(s, sizeof(s), "<div>%u</div>\n", i);
-        httpd_resp_sendstr_chunk(req, s);
-    }
-    httpd_resp_sendstr_chunk(req, nullptr);
     return ESP_OK;
 }
 
@@ -233,25 +185,43 @@ void WebServer::start_async_req_workers() {
 }
 
 
+esp_err_t WebServer::reset_wifi_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "uri: /reset");
+    GET_CONTEXT(req, ws);
 
-esp_err_t WebServer::quick_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "uri: /quick");
-    char s[100];
-    uint32_t random_number = 0;
-    esp_fill_random(&random_number, sizeof(random_number));
-    snprintf(s, sizeof(s), "random: %lu\n", random_number);
-    httpd_resp_sendstr(req, s);
-    return ESP_OK;
-}
-esp_err_t WebServer::index_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "uri: /");
-    const char* html = "<div><a href=\"/long\">long</a></div>"
-                       "<div><a href=\"/quick\">quick</a></div>";
-    httpd_resp_sendstr(req, html);
+	ws->webContext.wifiManager.clear();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
+
     return ESP_OK;
 }
 
 
+esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
+    GET_CONTEXT(req, ws);
+    // Get ESP uptime in seconds
+    uint64_t uptime_us = esp_timer_get_time();
+    uint32_t uptime_sec = static_cast<uint32_t>(uptime_us / 1000000ULL);
+
+    // Get current time
+    time_t now;
+    time(&now);
+    struct tm time_info;
+    localtime_r(&now, &time_info);
+
+    // Create ISO 8601 time string
+    char time_str[30];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S%z", &time_info);
+
+    JsonWrapper json;
+    json.AddItem("uptime", uptime_sec);
+    json.AddItem("time", time_str);
+    json.AddItem("duty", ws->webContext.pump.getCurrentPercentage());
+    std::string json_str = json.ToString();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str.c_str());
+    return ESP_OK;
+}
 
 esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "uri: /pump");
@@ -344,32 +314,3 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
     return ESP_OK;
 }
-
-
-
-esp_err_t WebServer::healthz_handler(httpd_req_t *req) {
-    GET_CONTEXT(req, ws);
-    // Get ESP uptime in seconds
-    uint64_t uptime_us = esp_timer_get_time();
-    uint32_t uptime_sec = static_cast<uint32_t>(uptime_us / 1000000ULL);
-
-    // Get current time
-    time_t now;
-    time(&now);
-    struct tm time_info;
-    localtime_r(&now, &time_info);
-
-    // Create ISO 8601 time string
-    char time_str[30];
-    strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S%z", &time_info);
-
-    JsonWrapper json;
-    json.AddItem("uptime", uptime_sec);
-    json.AddItem("time", time_str);
-    json.AddItem("duty", ws->webContext.pump.getCurrentPercentage());
-    std::string json_str = json.ToString();
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json_str.c_str());
-    return ESP_OK;
-}
-

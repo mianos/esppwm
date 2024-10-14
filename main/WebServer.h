@@ -7,6 +7,7 @@
 
 #include "PWMControl.h"
 #include "SettingsManager.h"
+#include "WifiManager.h"
 
 
 class WebServer {
@@ -14,6 +15,7 @@ public:
 	struct WebContext {
 		PWMControl& pump;
 		SettingsManager &settings;
+		WiFiManager &wifiManager;
 	};
 
     WebServer(WebContext& context);
@@ -38,11 +40,9 @@ private:
     static void async_req_worker_task(void *arg);
     static void start_async_req_workers();
 
-    static esp_err_t long_async_handler(httpd_req_t *req);
-    static esp_err_t quick_handler(httpd_req_t *req);
-    static esp_err_t index_handler(httpd_req_t *req);
 	static esp_err_t pump_handler(httpd_req_t *req);
 	static esp_err_t healthz_handler(httpd_req_t *req);
+	static esp_err_t reset_wifi_handler(httpd_req_t *req);
 
     static QueueHandle_t async_req_queue;
     static SemaphoreHandle_t worker_ready_count;
