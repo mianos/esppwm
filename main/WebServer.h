@@ -43,7 +43,7 @@ private:
 	static esp_err_t pump_handler(httpd_req_t *req);
 	static esp_err_t healthz_handler(httpd_req_t *req);
 	static esp_err_t reset_wifi_handler(httpd_req_t *req);
-	static esp_err_t adjust_duty_params_handler(httpd_req_t *req);
+	static esp_err_t adjust_signal_handler(httpd_req_t *req);
 
     static QueueHandle_t async_req_queue;
     static SemaphoreHandle_t worker_ready_count;

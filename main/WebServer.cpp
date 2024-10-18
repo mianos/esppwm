@@ -61,10 +61,10 @@ esp_err_t WebServer::start() {
         .user_ctx  = this
     };
 
-    httpd_uri_t adjust_duty_params_uri = {
-        .uri       = "/dutyparams",
+    httpd_uri_t adjust_signal_uri = {
+        .uri       = "/signal",
         .method    = HTTP_POST,
-        .handler   = adjust_duty_params_handler,
+        .handler   = adjust_signal_handler,
         .user_ctx  = this
     };
 
@@ -78,7 +78,7 @@ esp_err_t WebServer::start() {
 
 	httpd_register_uri_handler(server, &pump_uri);
 	httpd_register_uri_handler(server, &reset_wifi_uri);
-	httpd_register_uri_handler(server, &adjust_duty_params_uri);
+	httpd_register_uri_handler(server, &adjust_signal_uri);
 	httpd_register_uri_handler(server, &healthz_uri);
 
     return ESP_OK;
@@ -259,7 +259,7 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
         }
         received += ret;
     }
-    buffer[total_len] = '\0'; // Null-terminate the string
+    buffer[total_len] = '\0';
 
     // Parse the buffer using JsonWrapper
     JsonWrapper json = JsonWrapper::Parse(buffer.data());
@@ -301,8 +301,8 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-esp_err_t WebServer::adjust_duty_params_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "uri: /dutyparams");
+esp_err_t WebServer::adjust_signal_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "uri: /signal");
     GET_CONTEXT(req, ws);
 
     int total_len = req->content_len;
@@ -328,9 +328,8 @@ esp_err_t WebServer::adjust_duty_params_handler(httpd_req_t *req) {
         }
         received += ret;
     }
-    buffer[total_len] = '\0'; // Null-terminate the string
+    buffer[total_len] = '\0';
 
-    // Parse the buffer using JsonWrapper
     JsonWrapper json = JsonWrapper::Parse(buffer.data());
 
     // Parse "invert"
@@ -341,7 +340,7 @@ esp_err_t WebServer::adjust_duty_params_handler(httpd_req_t *req) {
 			ESP_LOGI(TAG, "Received invert: %s", invert ? "true" : "false");
 			ws->webContext.settings.Store("invert", invert ? "true" : "false");
 			ws->webContext.settings.invert = invert;
-		
+    		ws->webContext.pump.setDutyCyclePercentage(ws->webContext.pump.getCurrentPercentage());
 		}
 	}
     // Parse "frequency" (optional)
@@ -366,7 +365,6 @@ esp_err_t WebServer::adjust_duty_params_handler(httpd_req_t *req) {
     } else {
         ESP_LOGI(TAG, "Frequency field is not present, keeping previous frequency.");
     }
-    // Send the response back
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
     return ESP_OK;
