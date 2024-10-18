@@ -9,17 +9,26 @@
 EventGroupHandle_t WiFiManager::wifi_event_group;
 const char* WiFiManager::TAG = "WiFiManager";
 
+
 WiFiManager::WiFiManager(NvsStorageManager& storageManager,
-						 esp_event_handler_t eventHandler,
-						 void* eventHandlerArg, 
-						 bool clear_settings) : storageManager(storageManager) {
-	if (clear_settings) {
-		clear();
-	}
+                         esp_event_handler_t eventHandler,
+                         void* eventHandlerArg,
+                         bool clear_settings) : storageManager(storageManager) {
+    if (clear_settings) {
+        clear();
+    }
     ESP_ERROR_CHECK(esp_netif_init());
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+
+    esp_netif_t* netif = esp_netif_create_default_wifi_sta();
+
+    // Load and set hostname from NVS if available
+    std::string savedHostname;
+    if (loadHostname(savedHostname)) {
+        ESP_LOGI(TAG, "Loaded saved hostname: %s", savedHostname.c_str());
+        setHostname(savedHostname.c_str());
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -27,9 +36,11 @@ WiFiManager::WiFiManager(NvsStorageManager& storageManager,
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &localEventHandler, this));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &localEventHandler, this));
     ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &localEventHandler, this));
-	if (eventHandler != nullptr) {
-		ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eventHandler, eventHandlerArg));
-	}
+
+    if (eventHandler != nullptr) {
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eventHandler, eventHandlerArg));
+    }
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
 }
@@ -54,19 +65,31 @@ void WiFiManager::setHostname(const char* hostname) {
     }
 }
 
+
+
 void WiFiManager::localEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-	//auto *wev = static_cast<WiFiManager *>(arg);
+    // Correctly cast the arg to WiFiManager* to use instance methods
+    WiFiManager* instance = static_cast<WiFiManager*>(arg);
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-		ESP_LOGI(TAG, "INTO WIFI START EVENT");
-		bool provisioned = false;
-		ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
-		if (!provisioned) {
-			ESP_LOGI(TAG, "Not provisioned");
-			xTaskCreate(smartConfigTask, "smartConfigTask", 4096, NULL, 3, NULL);
-		} else {
-			ESP_LOGI(TAG, "already provisioned");
-			esp_wifi_connect();
-		}
+        ESP_LOGI(TAG, "INTO WIFI START EVENT");
+        bool provisioned = false;
+        ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
+        if (!provisioned) {
+            ESP_LOGI(TAG, "Not provisioned");
+            xTaskCreate(smartConfigTask, "smartConfigTask", 4096, NULL, 3, NULL);
+        } else {
+            ESP_LOGI(TAG, "Already provisioned");
+
+            // Use instance to access loadHostname
+            std::string savedHostname;
+            if (instance->loadHostname(savedHostname)) {
+                ESP_LOGI(TAG, "Loaded saved hostname: %s", savedHostname.c_str());
+                instance->setHostname(savedHostname.c_str());
+            }
+
+            esp_wifi_connect();
+        }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
@@ -76,7 +99,6 @@ void WiFiManager::localEventHandler(void* arg, esp_event_base_t event_base, int3
         ESP_LOGI(TAG, "Scan done");
     } else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL) {
         ESP_LOGI(TAG, "Found channel");
-	
     } else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD) {
         ESP_LOGI(TAG, "Got SSID and password");
 
@@ -110,17 +132,19 @@ void WiFiManager::localEventHandler(void* arg, esp_event_base_t event_base, int3
             strncpy(hostname, (char*)rvd_data, sizeof(hostname) - 1);
             ESP_LOGI(TAG, "Hostname received: %s", hostname);
 
-            setHostname(hostname);  // Set the hostname on the network interface
+            instance->setHostname(hostname);  // Use instance to call setHostname
+
+            // Save the hostname to NVS using the instance
+            instance->saveHostname(hostname);
         }
 
         ESP_ERROR_CHECK(esp_wifi_disconnect());  // Disconnect if already connected
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
         ESP_ERROR_CHECK(esp_wifi_connect());  // Connect to the Wi-Fi network
 
-	} else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE) {
-		xEventGroupSetBits(wifi_event_group, ESPTOUCH_DONE_BIT);
-	}
-
+    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE) {
+        xEventGroupSetBits(wifi_event_group, ESPTOUCH_DONE_BIT);
+    }
 }
 
 
@@ -152,3 +176,12 @@ void WiFiManager::clear() {
 	ESP_LOGI(TAG, "WiFi credentials cleared.");
 	esp_restart();
 }
+
+bool WiFiManager::saveHostname(const std::string& hostname) {
+    return storageManager.store("hostname", hostname);
+}
+
+bool WiFiManager::loadHostname(std::string& hostname) {
+    return storageManager.retrieve("hostname", hostname);
+}
+

@@ -29,4 +29,6 @@ private:
     static constexpr int CONNECTED_BIT = BIT0;
     static constexpr int ESPTOUCH_DONE_BIT = BIT1;
     static const char* TAG;
+	bool saveHostname(const std::string& hostname);
+	bool loadHostname(std::string& hostname);
 };
