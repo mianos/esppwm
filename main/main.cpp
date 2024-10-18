@@ -68,7 +68,7 @@ extern "C" void app_main() {
 	WiFiManager wifiManager(nv, localEventHandler, nullptr);
 	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
     if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
-		PWMControl pump(settings.frequency, settings.duty);
+		PWMControl pump(settings);
 
 		ESP_LOGI(TAG, "Main task continues after WiFi connection. duty is %g", settings.duty);
 		initialize_sntp(settings);

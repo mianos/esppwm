@@ -61,6 +61,13 @@ esp_err_t WebServer::start() {
         .user_ctx  = this
     };
 
+    httpd_uri_t adjust_duty_params_uri = {
+        .uri       = "/dutyparams",
+        .method    = HTTP_POST,
+        .handler   = adjust_duty_params_handler,
+        .user_ctx  = this
+    };
+
 	httpd_uri_t healthz_uri = {
 		.uri       = "/healthz",
 		.method    = HTTP_GET,
@@ -71,6 +78,7 @@ esp_err_t WebServer::start() {
 
 	httpd_register_uri_handler(server, &pump_uri);
 	httpd_register_uri_handler(server, &reset_wifi_uri);
+	httpd_register_uri_handler(server, &adjust_duty_params_uri);
 	httpd_register_uri_handler(server, &healthz_uri);
 
     return ESP_OK;
@@ -258,7 +266,6 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
 
     // Variables to hold parsed values
     float duty = 0.0f;
-    int frequency = 0;
     int period = 0;
 
     // Parse "duty"
@@ -268,27 +275,6 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
         ESP_LOGE(TAG, "Duty cycle is missing or not a number");
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid or missing 'duty' parameter");
         return ESP_FAIL;
-    }
-
-    // Parse "frequency" (optional)
-    if (json.ContainsField("frequency")) {
-        if (json.GetField<int>("frequency", frequency)) {
-            if (frequency > 0) {
-                ESP_LOGI(TAG, "Received frequency: %d", frequency);
-                ws->webContext.pump.setFrequency(frequency);
-                ws->webContext.settings.Store("frequency", std::to_string(frequency));
-            } else {
-                ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-                return ESP_FAIL;
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to parse 'frequency' field");
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-            return ESP_FAIL;
-        }
-    } else {
-        ESP_LOGI(TAG, "Frequency field is not present, keeping previous frequency.");
     }
 
     // Parse "period" (optional)
@@ -309,6 +295,77 @@ esp_err_t WebServer::pump_handler(httpd_req_t *req) {
         ws->webContext.settings.Store("duty", std::to_string(duty));
     }
 
+    // Send the response back
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
+    return ESP_OK;
+}
+
+esp_err_t WebServer::adjust_duty_params_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "uri: /dutyparams");
+    GET_CONTEXT(req, ws);
+
+    int total_len = req->content_len;
+    int received = 0;
+
+    if (total_len <= 0) {
+        ESP_LOGE(TAG, "Invalid content length: %d", total_len);
+        httpd_resp_send_err(req, HTTPD_411_LENGTH_REQUIRED, "Content-Length required");
+        return ESP_FAIL;
+    }
+    std::vector<char> buffer(total_len + 1); // +1 for null-terminator
+
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, buffer.data() + received, total_len - received);
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req); // Request Timeout
+            } else {
+                ESP_LOGE(TAG, "Failed to receive POST data");
+                httpd_resp_send_500(req);
+            }
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    buffer[total_len] = '\0'; // Null-terminate the string
+
+    // Parse the buffer using JsonWrapper
+    JsonWrapper json = JsonWrapper::Parse(buffer.data());
+
+    // Parse "invert"
+    if (json.ContainsField("invert")) {
+		bool invert = false;
+
+		if (json.GetField<bool>("invert", invert)) {
+			ESP_LOGI(TAG, "Received invert: %s", invert ? "true" : "false");
+			ws->webContext.settings.Store("invert", invert ? "true" : "false");
+			ws->webContext.settings.invert = invert;
+		
+		}
+	}
+    // Parse "frequency" (optional)
+    if (json.ContainsField("frequency")) {
+		int frequency = 0;
+
+        if (json.GetField<int>("frequency", frequency)) {
+            if (frequency > 0) {
+                ESP_LOGI(TAG, "Received frequency: %d", frequency);
+                ws->webContext.pump.setFrequency(frequency);
+                ws->webContext.settings.Store("frequency", std::to_string(frequency));
+            } else {
+                ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
+                return ESP_FAIL;
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to parse 'frequency' field");
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
+            return ESP_FAIL;
+        }
+    } else {
+        ESP_LOGI(TAG, "Frequency field is not present, keeping previous frequency.");
+    }
     // Send the response back
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"OK\"}");

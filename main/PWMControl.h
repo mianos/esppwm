@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <cmath>
@@ -8,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+
+#include "SettingsManager.h"
 
 // Constants
 static const int default_frequency = 5000;
@@ -21,13 +22,14 @@ struct DutyCycleCommand {
 
 class PWMControl {
 public:
-    PWMControl(int frequency = default_frequency, double duty = 50.0,
+    PWMControl(SettingsManager &settings,
                int gpio_num = GPIO_NUM_2,
                ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT)
-        : gpio_num(gpio_num),
-          frequency(static_cast<uint32_t>(frequency)),
+        : settings(settings),
+		  gpio_num(gpio_num),
+          frequency(static_cast<uint32_t>(settings.frequency)),
           resolution_bits(resolution_bits),
-          duty(duty),
+          duty(settings.duty),
           last_frequency(frequency),
           last_duty(duty) {
 
@@ -49,6 +51,9 @@ public:
         if (percentage < 0.0f) percentage = 0.0f;
         if (percentage > 100.0f) percentage = 100.0f;
 
+		if (settings.invert) {
+			percentage = 100.0f - percentage;
+		}
         int max_duty = (1 << resolution_bits) - 1;
         int newDuty = static_cast<int>((percentage / 100.0f) * max_duty);
 
@@ -167,6 +172,7 @@ private:
     }
 
 private:
+	SettingsManager &settings;
     int gpio_num;
     uint32_t frequency;
     ledc_timer_bit_t resolution_bits;
