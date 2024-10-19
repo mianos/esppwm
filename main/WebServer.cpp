@@ -336,32 +336,26 @@ esp_err_t WebServer::adjust_signal_handler(httpd_req_t *req) {
     if (json.ContainsField("invert")) {
 		bool invert = false;
 
-		if (json.GetField<bool>("invert", invert)) {
-			ESP_LOGI(TAG, "Received invert: %s", invert ? "true" : "false");
-			ws->webContext.settings.Store("invert", invert ? "true" : "false");
-			ws->webContext.settings.invert = invert;
-    		ws->webContext.pump.setDutyCyclePercentage(ws->webContext.pump.getCurrentPercentage());
-		}
+		json.GetField<bool>("invert", invert);
+		ESP_LOGI(TAG, "Received invert: %s", invert ? "true" : "false");
+		ws->webContext.settings.Store("invert", invert ? "true" : "false");
+		ws->webContext.settings.invert = invert;
+		ws->webContext.pump.setDutyCyclePercentage(ws->webContext.pump.getCurrentPercentage());
 	}
     // Parse "frequency" (optional)
     if (json.ContainsField("frequency")) {
 		int frequency = 0;
 
-        if (json.GetField<int>("frequency", frequency)) {
-            if (frequency > 0) {
-                ESP_LOGI(TAG, "Received frequency: %d", frequency);
-                ws->webContext.pump.setFrequency(frequency);
-                ws->webContext.settings.Store("frequency", std::to_string(frequency));
-            } else {
-                ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-                return ESP_FAIL;
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to parse 'frequency' field");
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
-            return ESP_FAIL;
-        }
+        json.GetField<int>("frequency", frequency);
+		if (frequency > 0) {
+			ESP_LOGI(TAG, "Received frequency: %d", frequency);
+			ws->webContext.pump.setFrequency(frequency);
+			ws->webContext.settings.Store("frequency", std::to_string(frequency));
+		} else {
+			ESP_LOGE(TAG, "Invalid frequency: %d", frequency);
+			httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid 'frequency' value");
+			return ESP_FAIL;
+		}
     } else {
         ESP_LOGI(TAG, "Frequency field is not present, keeping previous frequency.");
     }
