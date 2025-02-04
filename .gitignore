@@ -2,4 +2,3 @@ build/
 managed_components/
 dependencies.lock
 sdkconfig.old
-components/stepper_driver/tags
