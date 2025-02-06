@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 
-static const char* TAG_LOCAL = "LocalWebServer";
+//static const char* TAG_LOCAL = "LocalWebServer";
 
 // Constructor/destructor
 LocalWebServer::LocalWebServer(LocalWebContext* context)
@@ -40,10 +40,6 @@ esp_err_t LocalWebServer::start() {
 // /pump handler
 esp_err_t LocalWebServer::pump_handler(httpd_req_t* req) {
     auto* localServer = static_cast<LocalWebServer*>(req->user_ctx);
-    if (!localServer) {
-        return WebServer::sendJsonError(req, 500, "Missing LocalWebServer instance");
-    }
-
     auto* localCtx = static_cast<LocalWebContext*>(localServer->webContext);
     if (!localCtx || !localCtx->pump || !localCtx->settings) {
         return WebServer::sendJsonError(req, 500, "Invalid LocalWebContext / pump / settings");
@@ -83,24 +79,27 @@ esp_err_t LocalWebServer::pump_handler(httpd_req_t* req) {
             return WebServer::sendJsonError(req, 400, "Invalid 'period' field");
         }
         localCtx->pump->setDutyCyclePercentage(duty, period);
+		localCtx->settings->duty = duty;
         // Not persisting duty to NVS since it's a temporary change
     } else {
         localCtx->pump->setDutyCyclePercentage(duty);
+		localCtx->settings->duty = duty;
         localCtx->settings->Store("duty", std::to_string(duty));
     }
 
+	JsonWrapper response;
+    response.AddItem("status", "OK");
+    response.AddItem("duty", localCtx->settings->duty);
+
+    std::string responseStr = response.ToString();
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"OK\"}");
+    httpd_resp_sendstr(req, responseStr.c_str());
     return ESP_OK;
 }
 
-// /signal handler
+// /signal mode  handler
 esp_err_t LocalWebServer::signal_handler(httpd_req_t* req) {
     auto* localServer = static_cast<LocalWebServer*>(req->user_ctx);
-    if (!localServer) {
-        return WebServer::sendJsonError(req, 500, "Missing LocalWebServer instance");
-    }
-
     auto* localCtx = static_cast<LocalWebContext*>(localServer->webContext);
     if (!localCtx || !localCtx->pump || !localCtx->settings) {
         return WebServer::sendJsonError(req, 500, "Invalid LocalWebContext / pump / settings");
@@ -152,3 +151,7 @@ esp_err_t LocalWebServer::signal_handler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+void LocalWebServer::populate_healthz_fields(WebContext *ctx, JsonWrapper& json) {
+	auto* wc = static_cast<LocalWebContext*>(ctx);
+    json.AddItem("duty", wc->settings->duty);
+}

@@ -31,5 +31,7 @@ private:
     // Additional endpoints
     static esp_err_t pump_handler(httpd_req_t* req);
     static esp_err_t signal_handler(httpd_req_t* req);
+protected:
+    virtual void populate_healthz_fields(WebContext *ctx, JsonWrapper& json);
 };
 
