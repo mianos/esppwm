@@ -8,7 +8,7 @@
 #include "Button.h"
 #include "WifiManager.h"
 #include "SettingsManager.h"
-#include "WebServer.h"
+#include "LocalWebServer.h"
 #include "PWMControl.h"
 
 static const char *TAG = "npc";
@@ -73,8 +73,8 @@ extern "C" void app_main() {
 		ESP_LOGI(TAG, "Main task continues after WiFi connection. duty is %g", settings.duty);
 		initialize_sntp(settings);
 
-		static WebServer::WebContext ctx{pump, settings, wifiManager};
-        static WebServer webServer{ctx};
+		static LocalWebContext  ctx{&wifiManager, &pump, &settings};
+        static LocalWebServer webServer{&ctx};
 
         if (webServer.start() == ESP_OK) {
             ESP_LOGI(TAG, "Web server started successfully.");
