@@ -23,6 +23,7 @@ public:
     int frequency = 1000;
     float duty = 10;
     bool invert = false;
+    std::string otaUrl = "http://ota.mianos.com";
 
     std::string convertChangesToJson(const SettingsManager::ChangeList& changes) {
         cJSON *root = cJSON_CreateObject();
@@ -48,6 +49,7 @@ public:
         if (nvs.retrieve("invert", value)) {
             invert = (value == "t");
         }
+        nvs.retrieve("otaUrl", otaUrl);
     }
 
     std::string toJson() const {
@@ -57,6 +59,7 @@ public:
         json.AddItem("frequency", std::to_string(frequency));
         json.AddItem("duty", std::to_string(duty));
         json.AddItem("invert", invert ? "true" : "false");
+        json.AddItem("otaUrl", otaUrl);
         return json.ToString();
     }
 
@@ -72,6 +75,7 @@ public:
         updateFieldIfChanged(json, "frequency", frequency, changes);
         updateFieldIfChanged(json, "duty", duty, changes);
         updateFieldIfChanged(json, "invert", invert, changes);
+        updateFieldIfChanged(json, "otaUrl", otaUrl, changes);
 
         // Save any changes to NVRAM
         for (const auto& [key, value] : changes) {

@@ -8,6 +8,7 @@
 #include "Button.h"
 #include "WifiManager.h"
 #include "SettingsManager.h"
+#include "Ota.h"
 #include "LocalWebServer.h"
 #include "PWMControl.h"
 
@@ -67,13 +68,18 @@ extern "C" void app_main() {
 	wifiSemaphore = xSemaphoreCreateBinary();
 	WiFiManager wifiManager(nv, localEventHandler, nullptr);
 	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
+
+	OTAUpdater ota(settings.otaUrl, [](int progress) {
+		ESP_LOGI("OTA", "%d", progress);
+	});
+
     if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
 		PWMControl pump(settings);
 
 		ESP_LOGI(TAG, "Main task continues after WiFi connection. duty is %g", settings.duty);
 		initialize_sntp(settings);
 
-		static LocalWebContext  ctx{&wifiManager, &pump, &settings};
+		static LocalWebContext  ctx{&wifiManager, &pump, &settings, &ota};
         static LocalWebServer webServer{&ctx};
 
         if (webServer.start() == ESP_OK) {

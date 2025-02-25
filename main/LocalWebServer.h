@@ -2,36 +2,40 @@
 #include "WebServer.h"
 #include "PWMControl.h"
 #include "SettingsManager.h"
+#include "Ota.h"
+#include <string>
 
-// Derived context must see the definition of WebContext from WebServer.h
 struct LocalWebContext : public WebContext {
     PWMControl* pump;
     SettingsManager* settings;
+    OTAUpdater* ota;
 
-    // Order of parameters must match your usage
-    // 1) WiFiManager* 2) PWMControl* 3) SettingsManager*
-    LocalWebContext(WiFiManager* wifi, PWMControl* pumpPtr, SettingsManager* settingsPtr)
+    LocalWebContext(WiFiManager* wifi,
+                    PWMControl* pumpPtr,
+                    SettingsManager* settingsPtr,
+                    OTAUpdater* otaPtr)
         : WebContext(wifi),
           pump(pumpPtr),
-          settings(settingsPtr) {
+          settings(settingsPtr),
+          ota(otaPtr) {
     }
 };
 
 class LocalWebServer : public WebServer {
 public:
-    // Takes a LocalWebContext* to pass up to WebServer
     LocalWebServer(LocalWebContext* context);
-    // Remove 'override' if base destructor isn't virtual, or keep if it is
     ~LocalWebServer() override;
-
-    // Our base declares "virtual esp_err_t start()" so we can override it
     esp_err_t start() override;
 
 private:
-    // Additional endpoints
     static esp_err_t pump_handler(httpd_req_t* req);
     static esp_err_t signal_handler(httpd_req_t* req);
+    static esp_err_t ota_handler(httpd_req_t* req);
+
+    // Helper to read the POST body. Calls sendJsonError through the provided instance.
+    static esp_err_t readRequestBody(LocalWebServer* localServer, httpd_req_t* req, std::string& body);
+
 protected:
-    virtual void populate_healthz_fields(WebContext *ctx, JsonWrapper& json);
+    virtual void populate_healthz_fields(WebContext* context, JsonWrapper& json);
 };
 

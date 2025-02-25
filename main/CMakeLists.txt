@@ -13,4 +13,5 @@ idf_component_register(
         jsonwrapper
         esp_http_server
         button
+        otawrapper
 )
