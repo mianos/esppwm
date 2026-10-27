@@ -1,3 +1,19 @@
+# esppwm
+
+Condenser pump controller for the still: an ESP32-C3 driving a MOSFET from a
+PWM output on GPIO 2.
+
+## Build and update
+
+```sh
+./build.sh
+curl -X POST --data-binary @build/condensor.bin http://condenser/firmware   # OTA
+curl http://condenser/firmware                                              # running version
+```
+
+An update boots pending verification and rolls back automatically unless it
+reaches Wi-Fi within 120 s. `/healthz` reports duty, version and partition.
+
 ## Tests
 To set the pump **duty cycle**, use the following `curl` commands, replacing `${ESP_IP}` with the actual IP address dynamically.
 
@@ -16,7 +32,8 @@ curl -X POST http://${ESP_IP}/pump -H "Content-Type: application/json" -d '{"dut
 #### **Notes**
 - The `"duty"` value represents the percentage of the pump’s cycle (e.g., `50.0` for **50%**).
 - If `"period"` is **not** provided, the duty cycle is set **permanently**.
-- If `"period"` **is** provided (in milliseconds), the pump will return to **0%** after the duration expires.
+- If `"period"` **is** provided (in milliseconds), the pump returns to its previous duty afterwards. A timed duty is not stored or reported as the standing duty.
+- At power-on the pump resumes the last standing duty before Wi-Fi connects.
 
 
 ### 1. **Set Invert**
@@ -43,5 +60,5 @@ curl -X POST http://${ESP_IP}/signal -H "Content-Type: application/json" -d '{"i
 
 #### Notes:
 - Replace `${ESP_IP}` with the actual IP address of your ESP-based web server.
-- Ensure that the **frequency** value is greater than `0`, as negative or zero values will be rejected.
+- The **frequency** must be 1 to 9765 Hz (the 13-bit PWM limit); anything else is rejected and the output keeps its current frequency.
 - The `"invert"` parameter expects a boolean (`true` or `false`).
