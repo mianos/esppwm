@@ -1,41 +1,36 @@
 #pragma once
+#include <string>
+
 #include "WebServer.h"
 #include "PWMControl.h"
 #include "SettingsManager.h"
-#include "Ota.h"
-#include <string>
 
 struct LocalWebContext : public WebContext {
     PWMControl* pump;
     SettingsManager* settings;
-    OTAUpdater* ota;
 
-    LocalWebContext(WiFiManager* wifi,
-                    PWMControl* pumpPtr,
-                    SettingsManager* settingsPtr,
-                    OTAUpdater* otaPtr)
-        : WebContext(wifi),
-          pump(pumpPtr),
-          settings(settingsPtr),
-          ota(otaPtr) {
-    }
+    LocalWebContext(WiFiManager* wifi, PWMControl* pumpPtr, SettingsManager* settingsPtr)
+        : WebContext(wifi), pump(pumpPtr), settings(settingsPtr) {}
 };
 
+// Adds to the shared WebServer base (/reset, /set_hostname, /healthz):
+//   POST /pump      {"duty": %, "period": ms?}
+//   POST /signal    {"invert": bool?, "frequency": Hz?}
+//   POST /firmware  raw .bin body -> inactive OTA slot -> reboot
+//   GET  /firmware  running image version / partition
 class LocalWebServer : public WebServer {
 public:
-    LocalWebServer(LocalWebContext* context);
-    ~LocalWebServer() override;
+    explicit LocalWebServer(LocalWebContext* context);
     esp_err_t start() override;
+
+protected:
+    void populate_healthz_fields(WebContext* context, JsonWrapper& json) override;
 
 private:
     static esp_err_t pump_handler(httpd_req_t* req);
     static esp_err_t signal_handler(httpd_req_t* req);
-    static esp_err_t ota_handler(httpd_req_t* req);
+    static esp_err_t firmware_post_handler(httpd_req_t* req);
+    static esp_err_t firmware_get_handler(httpd_req_t* req);
 
-    // Helper to read the POST body. Calls sendJsonError through the provided instance.
     static esp_err_t readRequestBody(LocalWebServer* localServer, httpd_req_t* req, std::string& body);
-
-protected:
-    virtual void populate_healthz_fields(WebContext* context, JsonWrapper& json);
 };
-

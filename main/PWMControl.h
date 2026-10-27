@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cmath>
+#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -10,11 +10,6 @@
 
 #include "SettingsManager.h"
 
-// Constants
-static const int default_frequency = 5000;
-static const int QUEUE_SIZE = 10;
-
-// Struct to hold duty cycle and period
 struct DutyCycleCommand {
     int duty;
     int period;
@@ -22,116 +17,85 @@ struct DutyCycleCommand {
 
 class PWMControl {
 public:
-    PWMControl(SettingsManager &settings,
-               int gpio_num = GPIO_NUM_2,
-               ledc_timer_bit_t resolution_bits = LEDC_TIMER_13_BIT)
-        : settings(settings),
-		  gpio_num(gpio_num),
-          frequency(static_cast<uint32_t>(settings.frequency)),
-          resolution_bits(resolution_bits),
-          duty(settings.duty),
-          last_frequency(frequency),
-          last_duty(duty) {
+    static constexpr ledc_timer_bit_t kResolution = LEDC_TIMER_13_BIT;
+    // The LEDC source clock divided by the counter range; above this the
+    // timer can't be configured at 13-bit resolution.
+    static constexpr int kMaxFrequency = 80000000 / (1 << kResolution);
 
-        if (!initializeLEDC()) {
+    PWMControl(SettingsManager& settings, int gpio_num = GPIO_NUM_2)
+        : settings(settings), gpio_num(gpio_num), frequency(settings.frequency) {
+        if (frequency <= 0 || frequency > kMaxFrequency) frequency = 1000;
+        if (!configureLEDC(frequency)) {
             ESP_LOGE("PWMControl", "LEDC initialization failed.");
         }
-
         initializeQueueAndTask();
-        setDutyCyclePercentage(duty, 0);  // Start with initial duty cycle
-    }
-
-    float getCurrentPercentage() const {
-        int max_duty = (1 << resolution_bits) - 1;
-        float percentage = (static_cast<float>(duty) / max_duty) * 100.0f;
-        return std::round(percentage * 10.0f) / 10.0f;
+        setDutyCyclePercentage(settings.duty, 0);
     }
 
     void setDutyCyclePercentage(float percentage, int period = 0) {
         if (percentage < 0.0f) percentage = 0.0f;
         if (percentage > 100.0f) percentage = 100.0f;
-
-		if (settings.invert) {
-			percentage = 100.0f - percentage;
-		}
-        int max_duty = (1 << resolution_bits) - 1;
-        int newDuty = static_cast<int>((percentage / 100.0f) * max_duty);
-
-        DutyCycleCommand command = {newDuty, period};
+        if (settings.invert) percentage = 100.0f - percentage;
+        const int max_duty = (1 << kResolution) - 1;
+        DutyCycleCommand command = {static_cast<int>((percentage / 100.0f) * max_duty), period};
         if (xQueueSend(duty_cycle_queue, &command, portMAX_DELAY) != pdPASS) {
             ESP_LOGE("PWMControl", "Failed to send duty cycle command.");
         }
     }
 
-    void setFrequency(int newFrequency) {
-        if (newFrequency <= 0) {
-            ESP_LOGE("PWMControl", "Invalid frequency, setting to 5000");
-            newFrequency = 5000;
+    // Keeps the running configuration if the new frequency is rejected.
+    bool setFrequency(int newFrequency) {
+        if (newFrequency <= 0 || newFrequency > kMaxFrequency) {
+            ESP_LOGE("PWMControl", "frequency %d out of range (1..%d)", newFrequency, kMaxFrequency);
+            return false;
         }
-
-        frequency = static_cast<uint32_t>(newFrequency);
-        last_frequency = newFrequency;
-
-        int currentDuty = duty;  // Save the current duty cycle
-
-        if (!initializeLEDC()) {
-            ESP_LOGE("PWMControl", "LEDC reinitialization failed.");
-            return;
+        if (!configureLEDC(newFrequency)) {
+            configureLEDC(frequency);
+            setDutyCycle(duty);
+            return false;
         }
-
-        setDutyCycle(currentDuty);  // Reapply duty cycle
+        frequency = newFrequency;
+        setDutyCycle(duty);
+        return true;
     }
 
 private:
     void initializeQueueAndTask() {
-        duty_cycle_queue = xQueueCreate(QUEUE_SIZE, sizeof(DutyCycleCommand));
+        duty_cycle_queue = xQueueCreate(10, sizeof(DutyCycleCommand));
         if (duty_cycle_queue == nullptr) {
             ESP_LOGE("PWMControl", "Failed to create queue.");
             return;
         }
-
-        BaseType_t result = xTaskCreate(dutyCycleTask, "DutyCycleTask", 2048, this, 5, nullptr);
-        if (result != pdPASS) {
+        if (xTaskCreate(dutyCycleTask, "DutyCycleTask", 2048, this, 5, nullptr) != pdPASS) {
             ESP_LOGE("PWMControl", "Failed to create task.");
         }
     }
 
-
-	static void dutyCycleTask(void* pvParameter) {
-		PWMControl* pwm = static_cast<PWMControl*>(pvParameter);
-		DutyCycleCommand command;
-
-		for (;;) {
-			if (xQueueReceive(pwm->duty_cycle_queue, &command, portMAX_DELAY)) {
-				ESP_LOGI("PWMControl", "Received duty: %d, period: %d", command.duty, command.period);
-
-				if (command.period == 0) {
-					// If period is 0, just set the duty cycle
-					pwm->setDutyCycle(command.duty);
-				} else {
-					int previousDuty = pwm->duty;
-					pwm->setDutyCycle(command.duty);
-					// Wait for the specified period (in milliseconds)
-					vTaskDelay(pdMS_TO_TICKS(command.period));
-					pwm->setDutyCycle(previousDuty);
-				}
-			}
-		}
-	}
-
-    bool initializeLEDC() {
-        if (frequency == 0) {
-            ESP_LOGE("PWMControl", "Invalid frequency (0), setting to %d", default_frequency);
-            frequency = default_frequency;
+    static void dutyCycleTask(void* pvParameter) {
+        auto* pwm = static_cast<PWMControl*>(pvParameter);
+        DutyCycleCommand command;
+        for (;;) {
+            if (xQueueReceive(pwm->duty_cycle_queue, &command, portMAX_DELAY)) {
+                ESP_LOGI("PWMControl", "duty %d, period %d", command.duty, command.period);
+                if (command.period == 0) {
+                    pwm->setDutyCycle(command.duty);
+                } else {
+                    const int previousDuty = pwm->duty;
+                    pwm->setDutyCycle(command.duty);
+                    vTaskDelay(pdMS_TO_TICKS(command.period));
+                    pwm->setDutyCycle(previousDuty);
+                }
+            }
         }
+    }
 
+    bool configureLEDC(int freq) {
         ledc_timer_config_t ledc_timer{};
         ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
         ledc_timer.timer_num = LEDC_TIMER_0;
-        ledc_timer.duty_resolution = resolution_bits;
-        ledc_timer.freq_hz = frequency;
+        ledc_timer.duty_resolution = kResolution;
+        ledc_timer.freq_hz = static_cast<uint32_t>(freq);
         ledc_timer.clk_cfg = LEDC_AUTO_CLK;
-
         esp_err_t err = ledc_timer_config(&ledc_timer);
         if (err != ESP_OK) {
             ESP_LOGE("PWMControl", "Failed to configure timer: %s", esp_err_to_name(err));
@@ -142,45 +106,29 @@ private:
         ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
         ledc_channel.channel = LEDC_CHANNEL_0;
         ledc_channel.timer_sel = LEDC_TIMER_0;
-        ledc_channel.intr_type = LEDC_INTR_DISABLE;
         ledc_channel.gpio_num = gpio_num;
-        ledc_channel.duty = 0;
+        ledc_channel.duty = static_cast<uint32_t>(duty);
         ledc_channel.hpoint = 0;
-
         err = ledc_channel_config(&ledc_channel);
         if (err != ESP_OK) {
             ESP_LOGE("PWMControl", "Failed to configure channel: %s", esp_err_to_name(err));
             return false;
         }
-
         return true;
     }
 
     void setDutyCycle(int newDuty) {
         duty = newDuty;
-        last_duty = newDuty;
-
         esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+        if (err == ESP_OK) err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
         if (err != ESP_OK) {
             ESP_LOGE("PWMControl", "Failed to set duty: %s", esp_err_to_name(err));
         }
-
-        err = ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-        if (err != ESP_OK) {
-            ESP_LOGE("PWMControl", "Failed to update duty: %s", esp_err_to_name(err));
-        }
     }
 
-private:
-	SettingsManager &settings;
+    SettingsManager& settings;
     int gpio_num;
-    uint32_t frequency;
-    ledc_timer_bit_t resolution_bits;
-    int duty;
-
-    uint32_t last_frequency;
-    int last_duty;
-
-    QueueHandle_t duty_cycle_queue;
+    int frequency;
+    int duty = 0;
+    QueueHandle_t duty_cycle_queue = nullptr;
 };
-

@@ -1,17 +1,20 @@
-set(CMAKE_CXX_STANDARD 20)
 idf_component_register(
     SRCS
-       main.cpp
-	   LocalWebServer.cpp
+        main.cpp
+        LocalWebServer.cpp
     INCLUDE_DIRS
-       "."
+        "."
     REQUIRES
-        driver
+        esp_driver_ledc
+        esp_driver_gpio
         esp_timer
+        esp_system
+        esp_app_format
+        app_update
+        esp_http_server
         wifimanager
         nvsstoragemanager
         jsonwrapper
-        esp_http_server
         button
-        otawrapper
+        webserver
 )

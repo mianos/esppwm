@@ -1,20 +1,16 @@
 #pragma once
+#include <cmath>
+#include <cstdlib>
 #include <string>
-#include <type_traits>
-#include <vector>
-#include <utility>
 
 #include "esp_log.h"
 
 #include "NvsStorageManager.h"
-#include "JsonWrapper.h"
 
 class SettingsManager {
-    NvsStorageManager nvs;
+    NvsStorageManager& nvs;
 public:
-    using ChangeList = std::vector<std::pair<std::string, std::string>>;
-
-    SettingsManager(NvsStorageManager& nvs) : nvs(nvs) {
+    explicit SettingsManager(NvsStorageManager& nvs) : nvs(nvs) {
         loadSettings();
     }
 
@@ -23,103 +19,28 @@ public:
     int frequency = 1000;
     float duty = 10;
     bool invert = false;
-    std::string otaUrl = "http://ota.mianos.com";
-
-    std::string convertChangesToJson(const SettingsManager::ChangeList& changes) {
-        cJSON *root = cJSON_CreateObject();
-        for (const auto& [key, value] : changes) {
-            cJSON_AddStringToObject(root, key.c_str(), value.c_str());
-        }
-        char *rawJson = cJSON_Print(root);
-        std::string jsonResponse(rawJson);
-        cJSON_Delete(root);
-        free(rawJson); // cJSON_Print allocates memory that must be freed
-        return jsonResponse;
-    }
 
     void loadSettings() {
         std::string value;
-
         nvs.retrieve("tz", tz);
         nvs.retrieve("ntpServer", ntpServer);
-        if (nvs.retrieve("frequency", value))
-            frequency = std::stoi(value);
-        if (nvs.retrieve("duty", value))
-            duty = std::stof(value);
-        if (nvs.retrieve("invert", value)) {
-            invert = (value == "t");
+        if (nvs.retrieve("frequency", value)) {
+            char* end = nullptr;
+            const long f = std::strtol(value.c_str(), &end, 10);
+            if (end != value.c_str() && f > 0) frequency = static_cast<int>(f);
         }
-        nvs.retrieve("otaUrl", otaUrl);
+        if (nvs.retrieve("duty", value)) {
+            char* end = nullptr;
+            const float d = std::strtof(value.c_str(), &end);
+            if (end != value.c_str() && std::isfinite(d)) duty = d;
+        }
+        // Older builds wrote "t"/"f", the /signal handler writes "true"/"false".
+        if (nvs.retrieve("invert", value)) {
+            invert = (value == "true" || value == "t");
+        }
     }
 
-    std::string toJson() const {
-        JsonWrapper json;
-        json.AddItem("tz", tz);
-        json.AddItem("ntpServer", ntpServer);
-        json.AddItem("frequency", std::to_string(frequency));
-        json.AddItem("duty", std::to_string(duty));
-        json.AddItem("invert", invert ? "true" : "false");
-        json.AddItem("otaUrl", otaUrl);
-        return json.ToString();
-    }
-
-    void Store(const std::string key, std::string value) {
+    void Store(const std::string& key, const std::string& value) {
         nvs.store(key, value);
     }
-
-    ChangeList updateFromJson(const std::string& jsonString) {
-        ChangeList changes;
-        JsonWrapper json = JsonWrapper::Parse(jsonString);
-        updateFieldIfChanged(json, "tz", tz, changes);
-        updateFieldIfChanged(json, "ntpServer", ntpServer, changes);
-        updateFieldIfChanged(json, "frequency", frequency, changes);
-        updateFieldIfChanged(json, "duty", duty, changes);
-        updateFieldIfChanged(json, "invert", invert, changes);
-        updateFieldIfChanged(json, "otaUrl", otaUrl, changes);
-
-        // Save any changes to NVRAM
-        for (const auto& [key, value] : changes) {
-            nvs.store(key, value);
-        }
-        return changes;
-    }
-
-private:
-    template <typename T>
-    void updateFieldIfChanged(JsonWrapper& json, const std::string& key, T& field, SettingsManager::ChangeList& changes) {
-        if (json.ContainsField(key)) {  // Only proceed if the key exists in the JSON
-            T newValue;
-            if (json.GetField(key, newValue)) {  // Successfully retrieved new value
-                if (newValue != field) {
-                    field = newValue;
-
-                    // Log the change for response
-                    if constexpr (std::is_same_v<T, std::string>) {
-                        changes.emplace_back(key, field);
-                    } else {
-                        changes.emplace_back(key, std::to_string(field));
-                    }
-                }
-            } else {
-                ESP_LOGE("SettingsUpdate", "Failed to retrieve new value for %s", key.c_str());
-            }
-        }
-    }
-
-    // Specialized template to handle the bool `invert` field
-    void updateFieldIfChanged(JsonWrapper& json, const std::string& key, bool& field, SettingsManager::ChangeList& changes) {
-        if (json.ContainsField(key)) {
-            std::string newValueStr;
-            if (json.GetField(key, newValueStr)) {
-                bool newValue = (newValueStr == "true");
-                if (newValue != field) {
-                    field = newValue;
-                    changes.emplace_back(key, field ? "t" : "f");
-                }
-            } else {
-                ESP_LOGE("SettingsUpdate", "Failed to retrieve new value for %s", key.c_str());
-            }
-        }
-    }
 };
-

@@ -1,97 +1,99 @@
-#include <stdio.h>
+#include <cstdlib>
+#include <ctime>
 
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_sntp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "sdkconfig.h"
 
 #include "Button.h"
-#include "WifiManager.h"
-#include "SettingsManager.h"
-#include "Ota.h"
 #include "LocalWebServer.h"
 #include "PWMControl.h"
+#include "SettingsManager.h"
+#include "WifiManager.h"
 
-static const char *TAG = "npc";
+static const char* TAG = "esppwm";
 
-static SemaphoreHandle_t wifiSemaphore;
+static SemaphoreHandle_t wifiSemaphore = nullptr;
+static SemaphoreHandle_t s_got_ip = nullptr;
 
-static void localEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+// A freshly-OTA'd image boots in PENDING_VERIFY and is rolled back on the next
+// reset unless it marks itself good; it does so only once it is back on the
+// network, so an image that can't reach Wi-Fi doesn't strand the device.
+constexpr int OTA_VERIFY_TIMEOUT_MS = 120000;
+
+static void localEventHandler(void*, esp_event_base_t, int32_t event_id, void*) {
     if (event_id == IP_EVENT_STA_GOT_IP) {
-	    xSemaphoreGive(wifiSemaphore);
-	}
+        xSemaphoreGive(wifiSemaphore);
+        xSemaphoreGive(s_got_ip);
+    }
 }
 
-
-void initialize_sntp(SettingsManager& settings) {
-	setenv("TZ", settings.tz.c_str(), 1);
-	tzset();
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, settings.ntpServer.c_str());
-    esp_sntp_init();
-    ESP_LOGI(TAG, "SNTP service initialized");
-    int max_retry = 200;
-    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && max_retry--) {
-        vTaskDelay(100 / portTICK_PERIOD_MS); 
+static void otaVerifyTask(void*) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_LOGW(TAG, "OTA: image pending verify; waiting up to %ds for connectivity", OTA_VERIFY_TIMEOUT_MS / 1000);
+        if (xSemaphoreTake(s_got_ip, pdMS_TO_TICKS(OTA_VERIFY_TIMEOUT_MS)) == pdTRUE) {
+            esp_ota_mark_app_valid_cancel_rollback();
+            ESP_LOGI(TAG, "OTA: connectivity confirmed, image marked valid");
+        } else {
+            ESP_LOGE(TAG, "OTA: no IP within timeout; rolling back to previous image");
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+            ESP_LOGE(TAG, "OTA: rollback not possible; keeping current image");
+            esp_ota_mark_app_valid_cancel_rollback();
+        }
     }
-    if (max_retry <= 0) {
-        ESP_LOGE(TAG, "Failed to synchronize NTP time");
-        return; // Exit if unable to sync
-    }
-    time_t now = time(nullptr);
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
-    ESP_LOGI("TimeTest", "Current local time and date: %d-%d-%d %02d:%02d:%02d",
-             1900 + timeinfo.tm_year, 1 + timeinfo.tm_mon, timeinfo.tm_mday,
-             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    vTaskDelete(nullptr);
 }
 
-
-void button_task(void *pvParameters) {
-	WiFiManager *wifiManager = static_cast<WiFiManager*>(pvParameters);  // Cast the void pointer back to WiFiManager pointer
-
+static void button_task(void* pvParameters) {
+    auto* wifiManager = static_cast<WiFiManager*>(pvParameters);
     Button button(static_cast<gpio_num_t>(CONFIG_BUTTON_PIN));
-    while (1) {
+    for (;;) {
         if (button.longPressed()) {
             ESP_LOGI("BUTTON", "Long press detected, resetting WiFi settings.");
             wifiManager->clear();
         }
-        vTaskDelay(pdMS_TO_TICKS(100)); // Check every 100 ms
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
-
 extern "C" void app_main() {
-	NvsStorageManager nv;
-	SettingsManager settings(nv);
+    wifiSemaphore = xSemaphoreCreateBinary();
+    s_got_ip = xSemaphoreCreateBinary();
 
-	wifiSemaphore = xSemaphoreCreateBinary();
-	WiFiManager wifiManager(nv, localEventHandler, nullptr);
-	xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, NULL);
+    NvsStorageManager nv;
+    SettingsManager settings(nv);
 
-	OTAUpdater ota(settings.otaUrl, [](int progress) {
-		ESP_LOGI("OTA", "%d", progress);
-	});
+    // Before Wi-Fi, so the pump resumes its last duty after a power blip even
+    // if the network is down.
+    static PWMControl pump(settings);
+    ESP_LOGI(TAG, "duty %g%%, frequency %d Hz, invert %d", settings.duty, settings.frequency, settings.invert);
 
-    if (xSemaphoreTake(wifiSemaphore, portMAX_DELAY) ) {
-		PWMControl pump(settings);
+    static WiFiManager wifiManager(nv, localEventHandler, nullptr);
+    xTaskCreate(button_task, "button_task", 2048, &wifiManager, 10, nullptr);
+    xTaskCreate(otaVerifyTask, "ota_verify", 4096, nullptr, 4, nullptr);
 
-		ESP_LOGI(TAG, "Main task continues after WiFi connection. duty is %g", settings.duty);
-		initialize_sntp(settings);
+    xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
 
-		static LocalWebContext  ctx{&wifiManager, &pump, &settings, &ota};
-        static LocalWebServer webServer{&ctx};
+    setenv("TZ", settings.tz.c_str(), 1);
+    tzset();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, settings.ntpServer.c_str());
+    esp_sntp_init();
 
-        if (webServer.start() == ESP_OK) {
-            ESP_LOGI(TAG, "Web server started successfully.");
-        } else {
-            ESP_LOGE(TAG, "Failed to start web server.");
-        }
+    static LocalWebContext ctx{&wifiManager, &pump, &settings};
+    static LocalWebServer webServer{&ctx};
+    if (webServer.start() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start web server.");
+    }
 
-		while (true) {
-			vTaskDelay(pdMS_TO_TICKS(100)); 
-		
-		}
-	}
-
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
