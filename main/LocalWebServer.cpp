@@ -15,18 +15,6 @@
 
 static const char* TAG = "LocalWebServer";
 
-namespace {
-
-constexpr int kMaxBodyBytes = 1024;
-
-esp_err_t send_json(httpd_req_t* req, const JsonWrapper& json) {
-    httpd_resp_set_type(req, "application/json");
-    const std::string out = json.ToString();
-    return httpd_resp_sendstr(req, out.c_str());
-}
-
-}  // namespace
-
 LocalWebServer::LocalWebServer(LocalWebContext* context) : WebServer(context) {}
 
 esp_err_t LocalWebServer::start() {
@@ -38,8 +26,9 @@ esp_err_t LocalWebServer::start() {
         httpd_method_t method;
         esp_err_t (*handler)(httpd_req_t*);
     };
-    const std::array<Route, 4> routes = {{
+    const std::array<Route, 5> routes = {{
         {"/pump",     HTTP_POST, pump_handler},
+        {"/pump",     HTTP_GET,  pump_get_handler},
         {"/signal",   HTTP_POST, signal_handler},
         {"/firmware", HTTP_POST, firmware_post_handler},
         {"/firmware", HTTP_GET,  firmware_get_handler},
@@ -60,34 +49,15 @@ esp_err_t LocalWebServer::start() {
     return ESP_OK;
 }
 
-esp_err_t LocalWebServer::readRequestBody(LocalWebServer* localServer, httpd_req_t* req, std::string& body) {
-    const int contentLength = req->content_len;
-    if (contentLength <= 0) return localServer->sendJsonError(req, 411, "Content-Length required");
-    if (contentLength > kMaxBodyBytes) return localServer->sendJsonError(req, 413, "request body too large");
-    std::vector<char> buffer(contentLength);
-    int received = 0;
-    while (received < contentLength) {
-        int ret = httpd_req_recv(req, buffer.data() + received, contentLength - received);
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        if (ret <= 0) {
-            localServer->sendJsonError(req, 400, "request body truncated");
-            return ESP_FAIL;
-        }
-        received += ret;
-    }
-    body.assign(buffer.data(), contentLength);
-    return ESP_OK;
-}
-
 // A timed duty ("period" ms) reverts to the previous duty afterwards and is
 // neither stored nor reported as the standing duty.
 esp_err_t LocalWebServer::pump_handler(httpd_req_t* req) {
     auto* self = static_cast<LocalWebServer*>(req->user_ctx);
     auto* ctx = static_cast<LocalWebContext*>(self->webContext);
 
-    std::string body;
-    if (readRequestBody(self, req, body) != ESP_OK) return ESP_FAIL;
-    JsonWrapper json = JsonWrapper::Parse(body);
+    JsonWrapper json;
+    if (!readJsonBody(req, json, 1024)) return ESP_FAIL;
+    ESP_LOGW(TAG, "POST %s from %s: %s", req->uri, callerAddress(req).c_str(), json.ToString().c_str());
 
     float duty = 0.0f;
     if (!json.GetField<float>("duty", duty)) return self->sendJsonError(req, 400, "Missing or invalid 'duty'");
@@ -106,19 +76,34 @@ esp_err_t LocalWebServer::pump_handler(httpd_req_t* req) {
     }
 
     JsonWrapper response;
-    response.AddItem("status", std::string("OK"));
-    response.AddItem("duty", ctx->settings->duty);
-    return send_json(req, response);
+    pumpState(ctx, response);
+    return sendJson(req, response);
+}
+
+esp_err_t LocalWebServer::pump_get_handler(httpd_req_t* req) {
+    auto* self = static_cast<LocalWebServer*>(req->user_ctx);
+    JsonWrapper response;
+    pumpState(static_cast<LocalWebContext*>(self->webContext), response);
+    return sendJson(req, response);
+}
+
+void LocalWebServer::pumpState(LocalWebContext* ctx, JsonWrapper& json) {
+    json.AddItem("duty", ctx->settings->duty);
+    json.AddItem("frequency", ctx->settings->frequency);
+    json.AddItem("invert", ctx->settings->invert);
 }
 
 esp_err_t LocalWebServer::signal_handler(httpd_req_t* req) {
     auto* self = static_cast<LocalWebServer*>(req->user_ctx);
     auto* ctx = static_cast<LocalWebContext*>(self->webContext);
 
-    std::string body;
-    if (readRequestBody(self, req, body) != ESP_OK) return ESP_FAIL;
-    JsonWrapper json = JsonWrapper::Parse(body);
+    JsonWrapper json;
+    if (!readJsonBody(req, json, 1024)) return ESP_FAIL;
+    ESP_LOGW(TAG, "POST %s from %s: %s", req->uri, callerAddress(req).c_str(), json.ToString().c_str());
 
+    if (!json.ContainsField("frequency") && !json.ContainsField("invert")) {
+        return self->sendJsonError(req, 400, "need 'frequency' and/or 'invert'");
+    }
     if (json.ContainsField("frequency")) {
         int frequency = 0;
         if (!json.GetField<int>("frequency", frequency) || !ctx->pump->setFrequency(frequency)) {
@@ -139,10 +124,8 @@ esp_err_t LocalWebServer::signal_handler(httpd_req_t* req) {
     }
 
     JsonWrapper response;
-    response.AddItem("status", std::string("OK"));
-    response.AddItem("frequency", ctx->settings->frequency);
-    response.AddItem("invert", ctx->settings->invert);
-    return send_json(req, response);
+    pumpState(ctx, response);
+    return sendJson(req, response);
 }
 
 void LocalWebServer::populate_healthz_fields(WebContext* context, JsonWrapper& json) {
@@ -159,6 +142,7 @@ void LocalWebServer::populate_healthz_fields(WebContext* context, JsonWrapper& j
 esp_err_t LocalWebServer::firmware_post_handler(httpd_req_t* req) {
     auto* self = static_cast<LocalWebServer*>(req->user_ctx);
     if (req->content_len <= 0) return self->sendJsonError(req, 400, "Content-Length required");
+    ESP_LOGW(TAG, "POST /firmware from %s", callerAddress(req).c_str());
 
     const esp_partition_t* target = esp_ota_get_next_update_partition(nullptr);
     if (target == nullptr) return self->sendJsonError(req, 500, "no OTA partition available");
@@ -197,10 +181,10 @@ esp_err_t LocalWebServer::firmware_post_handler(httpd_req_t* req) {
 
     ESP_LOGW(TAG, "OTA: %d bytes written to %s; rebooting", written, target->label);
     JsonWrapper resp;
-    resp.AddItem("status",    std::string("ok"));
     resp.AddItem("written",   written);
     resp.AddItem("partition", std::string(target->label));
-    send_json(req, resp);
+    resp.AddItem("rebooting", true);
+    sendJson(req, resp);
 
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -216,5 +200,5 @@ esp_err_t LocalWebServer::firmware_get_handler(httpd_req_t* req) {
     resp.AddItem("date",      std::string(desc->date));
     resp.AddItem("time",      std::string(desc->time));
     resp.AddItem("partition", std::string(running->label));
-    return send_json(req, resp);
+    return sendJson(req, resp);
 }

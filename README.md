@@ -14,6 +14,13 @@ curl http://condenser/firmware                                              # ru
 An update boots pending verification and rolls back automatically unless it
 reaches Wi-Fi within 120 s. `/healthz` reports duty, version and partition.
 
+## API conventions
+
+`POST /pump`, `POST /signal` and `GET /pump` all reply with the pump state,
+`{"duty", "frequency", "invert"}`. Errors return `{"error", "statusCode"}`
+with the same HTTP status (400 bad input, 404/405 unknown path or method,
+413 body too large). Every POST is logged with the caller's address.
+
 ## Tests
 To set the pump **duty cycle**, use the following `curl` commands, replacing `${ESP_IP}` with the actual IP address dynamically.
 

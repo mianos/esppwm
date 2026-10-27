@@ -15,6 +15,7 @@ struct LocalWebContext : public WebContext {
 
 // Adds to the shared WebServer base (/reset, /set_hostname, /healthz):
 //   POST /pump      {"duty": %, "period": ms?}
+//   GET  /pump      {"duty", "frequency", "invert"}; POST /pump and /signal reply the same
 //   POST /signal    {"invert": bool?, "frequency": Hz?}
 //   POST /firmware  raw .bin body -> inactive OTA slot -> reboot
 //   GET  /firmware  running image version / partition
@@ -28,9 +29,10 @@ protected:
 
 private:
     static esp_err_t pump_handler(httpd_req_t* req);
+    static esp_err_t pump_get_handler(httpd_req_t* req);
     static esp_err_t signal_handler(httpd_req_t* req);
     static esp_err_t firmware_post_handler(httpd_req_t* req);
     static esp_err_t firmware_get_handler(httpd_req_t* req);
 
-    static esp_err_t readRequestBody(LocalWebServer* localServer, httpd_req_t* req, std::string& body);
+    static void pumpState(LocalWebContext* ctx, JsonWrapper& json);
 };
