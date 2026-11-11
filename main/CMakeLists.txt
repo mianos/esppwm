@@ -16,5 +16,5 @@ idf_component_register(
         nvsstoragemanager
         jsonwrapper
         button
-        webserver
+        webserver wifiwebserver
 )

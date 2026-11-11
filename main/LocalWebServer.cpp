@@ -15,7 +15,7 @@
 
 static const char* TAG = "LocalWebServer";
 
-LocalWebServer::LocalWebServer(LocalWebContext* context) : WebServer(context) {}
+LocalWebServer::LocalWebServer(LocalWebContext* context) : WifiWebServer(context) {}
 
 esp_err_t LocalWebServer::start() {
     esp_err_t r = WebServer::start();

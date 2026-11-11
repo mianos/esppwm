@@ -1,16 +1,16 @@
 #pragma once
 #include <string>
 
-#include "WebServer.h"
+#include "WifiWebServer.h"
 #include "PWMControl.h"
 #include "SettingsManager.h"
 
-struct LocalWebContext : public WebContext {
+struct LocalWebContext : public WifiWebContext {
     PWMControl* pump;
     SettingsManager* settings;
 
     LocalWebContext(WiFiManager* wifi, PWMControl* pumpPtr, SettingsManager* settingsPtr)
-        : WebContext(wifi), pump(pumpPtr), settings(settingsPtr) {}
+        : WifiWebContext(wifi), pump(pumpPtr), settings(settingsPtr) {}
 };
 
 // Adds to the shared WebServer base (/reset, /set_hostname, /healthz):
@@ -19,7 +19,7 @@ struct LocalWebContext : public WebContext {
 //   POST /signal    {"invert": bool?, "frequency": Hz?}
 //   POST /firmware  raw .bin body -> inactive OTA slot -> reboot
 //   GET  /firmware  running image version / partition
-class LocalWebServer : public WebServer {
+class LocalWebServer : public WifiWebServer {
 public:
     explicit LocalWebServer(LocalWebContext* context);
     esp_err_t start() override;
